@@ -64,8 +64,9 @@ firewall() { local port="${1:-1194}" docker_network="$(ip -o addr show dev eth0|
     ip6tables -A OUTPUT -o lo -j ACCEPT 2>/dev/null
     ip6tables -A OUTPUT -o tap0 -j ACCEPT 2>/dev/null
     ip6tables -A OUTPUT -o tun0 -j ACCEPT 2>/dev/null
+    ip6tables -A OUTPUT -p udp -m udp --dport 53 -j DROP 2>/dev/null
+    ip6tables -A OUTPUT -p tcp -m tcp --dport 853 -j ACCEPT 2>/dev/null
     ip6tables -A OUTPUT -d ${docker6_network} -j ACCEPT 2>/dev/null
-    ip6tables -A OUTPUT -p udp -m udp --dport 53 -j ACCEPT 2>/dev/null
     ip6tables -A OUTPUT -p tcp -m owner --gid-owner vpn -j ACCEPT 2>/dev/null &&
     ip6tables -A OUTPUT -p udp -m owner --gid-owner vpn -j ACCEPT 2>/dev/null||{
         ip6tables -A OUTPUT -p tcp -m tcp --dport $port -j ACCEPT 2>/dev/null
@@ -76,14 +77,20 @@ firewall() { local port="${1:-1194}" docker_network="$(ip -o addr show dev eth0|
     iptables -A OUTPUT -o lo -j ACCEPT
     iptables -A OUTPUT -o tap0 -j ACCEPT
     iptables -A OUTPUT -o tun0 -j ACCEPT
+    iptables -A OUTPUT -p udp -m udp --dport 53 -j DROP
+    iptables -A OUTPUT -p tcp -m tcp --dport 853 -j ACCEPT
     iptables -A OUTPUT -d ${docker_network} -j ACCEPT
-    iptables -A OUTPUT -p udp -m udp --dport 53 -j ACCEPT
     iptables -A OUTPUT -p tcp -m owner --gid-owner vpn -j ACCEPT 2>/dev/null &&
     iptables -A OUTPUT -p udp -m owner --gid-owner vpn -j ACCEPT || {
         iptables -A OUTPUT -p tcp -m tcp --dport $port -j ACCEPT
         iptables -A OUTPUT -p udp -m udp --dport $port -j ACCEPT; }
     [[ -s $route6 ]] && for net in $(cat $route6); do return_route6 $net; done
     [[ -s $route ]] && for net in $(cat $route); do return_route $net; done
+
+    # Start unbound and use it for DNS queries
+    $(ifconfig | grep -q inet6) && $(sed -i -e '/do-ip6/c do-ip6: yes' /etc/unbound/unbound.conf)
+    unbound
+    cat /etc/resolv.unbound > /etc/resolv.conf # have to cat instead of mv/cp because /etc/resolv.conf is a bind mount managed by Docker
 }
 
 ### return_route: add a route back to your network, so that return traffic works
@@ -95,7 +102,7 @@ return_route6() { local network="$1" gw="$(ip -6 route |
     ip -6 route | grep -q "$network" ||
         ip -6 route add to $network via $gw dev eth0
     ip6tables -A OUTPUT --destination $network -j ACCEPT 2>/dev/null
-    [[ -e $route6 ]] &&grep -q "^$network\$" $route6 ||echo "$network" >>$route6
+    [[ -e $route6 ]] && grep -q "^$network\$" $route6 ||echo "$network" >>$route6
 }
 
 ### return_route: add a route back to your network, so that return traffic works
@@ -229,7 +236,7 @@ while getopts ":hc:df:m:p:R:r:v:" opt; do
         h) usage ;;
         c) cert_auth "$OPTARG" ;;
         d) dns ;;
-        f) firewall "$OPTARG"; touch $route $route6 ;;
+        f) firewall "$OPTARG"; touch $route $route6 2>/dev/null;;
         m) MSS="$OPTARG" ;;
         p) eval vpnportforward $(sed 's/^/"/; s/$/"/; s/;/" "/g' <<< $OPTARG) ;;
         R) return_route6 "$OPTARG" ;;

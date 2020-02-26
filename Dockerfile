@@ -1,5 +1,5 @@
 FROM alpine
-MAINTAINER David Personette <dperson@gmail.com>
+MAINTAINER Dale Phurrough <dale@hidale.com>
 
 # Install openvpn
 RUN apk --no-cache --no-progress upgrade && \
@@ -10,11 +10,10 @@ RUN apk --no-cache --no-progress upgrade && \
 COPY openvpn.sh /usr/bin/
 
 # Install unbound
-COPY --from=qmcgaw/dns-trustanchor /named.root /etc/unbound/root.hints
-COPY --from=qmcgaw/dns-trustanchor /root.key /etc/unbound/root.key
 COPY unbound.conf /etc/unbound/unbound.conf
 ADD resolv.unbound /etc/resolv.unbound
 RUN chmod -R u=rwX,go=rX /etc/unbound/ && \
+    ln -s ../../usr/share/dnssec-root/trusted-key.key /etc/unbound/root.key && \
     chmod 444 /etc/resolv.unbound
 
 HEALTHCHECK --interval=60s --timeout=15s --start-period=120s \
